@@ -22,21 +22,19 @@ MODEL_NAME = "/ssd_data/models/Qwen3-30B-A3B-Instruct-2507-FP8"
 DEFAULT_TIMEOUT = 300
 
 # Parse command line arguments
-DEFAULT_QUERY_ID = '101'
 parser = argparse.ArgumentParser(description="Optimizer program")
-parser.add_argument("--query-id", type=str, default=str(DEFAULT_QUERY_ID),
-                    help=f"Query ID (default: {DEFAULT_QUERY_ID})")
+parser.add_argument("--output", "--output-file", type=str, required=True,
+                    help="Output file path (required)")
+parser.add_argument("--sql", type=str, required=True,
+                    help="SQL content (required)")
+# parser.add_argument("--stat", type=str, default="",
+#                     help="Statistics content (optional, default: empty)")
 args = parser.parse_args()
 
-QUERY_ID = args.query_id
+OUTPUT_FILE = args.output
+SQL_CONTENT = args.sql
+# STAT_CONTENT = args.stat
 
-# Define file paths with QUERY_ID
-SQL_FILE = f"/home/liujianzhong/spj_queries/query{QUERY_ID}_spj.sql"
-EXPLAIN_FILE = f"/home/liujianzhong/spj_queries/explain/explain_query{QUERY_ID}_spj.json"
-SCHEMA_FILE = "/home/liujianzhong/spj_queries/schema.md"
-MANUAL_FILE = "/home/liujianzhong/spj_queries/optimizer_manual.md"
-HINT_SPEC_FILE = "/home/liujianzhong/spj_queries/hint_spec.md"
-OUT_HINT_FILE = f"/home/liujianzhong/proposal-source/output/out_{QUERY_ID}.json"
 
 # Read file contents
 def read_file(filepath):
@@ -51,11 +49,9 @@ def read_file(filepath):
         print(f"[ERROR] Failed to read file {filepath}: {e}")
         return ""
 
-SQL_CONTENT = read_file(SQL_FILE)
-EXPLAIN_CONTENT = read_file(EXPLAIN_FILE)
-SCHEMA_CONTENT = read_file(SCHEMA_FILE)
-MANUAL_CONTENT = read_file(MANUAL_FILE)
-HINT_SPEC_CONTENT = read_file(HINT_SPEC_FILE)
+# Define file paths
+STAT_FILE = "/home/liujianzhong/proposal-source/stat.txt"
+STAT_CONTENT = read_file(STAT_FILE)
 
 # System prompt
 SYSTEM_PROMPT = """
@@ -80,57 +76,42 @@ PROMPTS = [
 
 向量标量混合查询：同时包含标量过滤条件与向量相似度搜索。
 
-### 查询模板语句
+### 查询语句
 ```sql
-SELECT id FROM sift1m
-  WHERE attr >= 3 AND attr <= 6
-  ORDER BY embedding <-> %s
-  LIMIT 100
+{SQL_CONTENT}
 ```
 
 ## 数据库元数据与统计信息
 
-### sift1m 表结构
+### my_table 表结构
 
 ```
-  Column   |       Type       | Collation | Nullable | Default | Storage  | Compression | Stats target | Description
------------+------------------+-----------+----------+---------+----------+-------------+--------------+-------------
- id        | integer          |           | not null |         | plain    |             |              |
- embedding | vector(128)      |           | not null |         | external |             |              |
- attr      | double precision |           |          |         | plain    |             |              |
+                                            Table "public.my_table"
+  Column   |    Type     | Collation | Nullable | Default | Storage  | Compression | Stats target | Description
+-----------+-------------+-----------+----------+---------+----------+-------------+--------------+-------------
+ id        | integer     |           | not null |         | plain    |             |              |
+ equal     | smallint    |           |          |         | plain    |             |              |
+ image_vec | vector(128) |           |          |         | external |             |              |
 Indexes:
-    "sift1m_pkey" PRIMARY KEY, btree (id)
-    "sift1m_hnsw_idx" hnsw (embedding vector_l2_ops) WITH (m='16', ef_construction='64')
-    "sift1m_ivfflat_idx" ivfflat (embedding) WITH (lists='1000')
+    "my_table_pkey" PRIMARY KEY, btree (id)
+    "idx_my_table_image_vec_hnsw" hnsw (image_vec vector_l2_ops)
+    "idx_my_table_image_vec_ivfflat" ivfflat (image_vec)
 Access method: heap
 ```
 
 - 向量索引：
-  - `sift1m_hnsw_idx`：HNSW 索引，使用 L2 距离
-  - `sift1m_ivfflat_idx`：IVFFlat 索引，未显式指定距离函数（默认与操作符对齐）
+  - `idx_my_table_image_vec_hnsw`：HNSW 索引，使用 L2 距离
+  - `idx_my_table_image_vec_ivfflat`：IVFFlat 索引，未显式指定距离函数（默认与操作符对齐）
 - 存储引擎：堆表
 
 
 ### 统计信息 ###
 
-- sift1m表总行数： 1000000行
+- my_table表总行数： 1000000行
 - 向量字段(embddding)维数：128维
-- attr字段数据分布：
+- 数据分布：
 	```
-	sift=# select attr, count(*) from sift1m group by attr;
-	 attr | count
-	------+-------
-		0 | 90905
-		1 | 91125
-		2 | 90721
-		3 | 90253
-		4 | 91408
-		5 | 91023
-		6 | 90896
-		7 | 90676
-		8 | 90620 
-		9 | 91179
-	   10 | 91194
+    {STAT_CONTENT}
 	```
 
 ## 必备知识
@@ -179,7 +160,7 @@ Access method: heap
   "strategy_id": <1-5>,
   "name": "策略简要名称",
   "description": "结合本数据分布（选择性约36.4%）说明该策略的设计思想、优点及潜在代价，务必引用选择性数值。",
-  "vector_index_used": "索引名，如 sift1m_hnsw_idx 或 sift1m_ivfflat_idx 或 null（表示不使用，需精确搜索）",
+  "vector_index_used": "索引名，如 idx_my_table_image_vec_hnsw 或 idx_my_table_image_vec_ivfflat 或 null（表示不使用，需精确搜索）",
   "index_parameters": {
     "type": "HNSW 或 IVFFlat 或 none",
     "m": <仅HNSW>,
@@ -291,9 +272,8 @@ def main():
     print(f"[INFO] Client initialized successfully")
     print(f"[INFO] Base URL: {BASE_URL}")
     print(f"[INFO] Model: {MODEL_NAME}")
-    print(f"[INFO] Query ID: {QUERY_ID}")
-    print(f"[INFO] SQL file: {SQL_FILE}")
-    print(f"[INFO] Explain file: {EXPLAIN_FILE}")
+    print(f"[INFO] Output file: {OUTPUT_FILE}")
+    print(f"[INFO] SQL content length: {len(SQL_CONTENT)}")
 
     # print(f"\n[INFO] System prompt: {SYSTEM_PROMPT}")
     # print(f"=" * 60)
@@ -303,9 +283,12 @@ def main():
         {"role": "system", "content": SYSTEM_PROMPT}
     ]
 
+    # Replace placeholders in prompts with actual values
+    processed_prompts = [p.replace("{SQL_CONTENT}", SQL_CONTENT).replace("{STAT_CONTENT}", STAT_CONTENT) for p in PROMPTS]
+
     # Process each prompt
-    for i, prompt in enumerate(PROMPTS):
-        print(f"\n[INFO] Prompt#{i+1} prompt length: {len(prompt)}: (SQL content length: {len(SQL_CONTENT)}, Explain content length: {len(EXPLAIN_CONTENT)})")
+    for i, prompt in enumerate(processed_prompts):
+        print(f"\n[INFO] Prompt#{i+1} prompt length: {len(prompt)}: (SQL content length: {len(SQL_CONTENT)})")
 
         # Record client start time (before sending request)
         client_start_time = time.time()
@@ -347,9 +330,9 @@ def main():
 
             # Write assistant_message to output file
             try:
-                with open(OUT_HINT_FILE, 'w', encoding='utf-8') as f:
+                with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
                     f.write(assistant_message)
-                print(f"[INFO] Output written to: {OUT_HINT_FILE}")
+                print(f"[INFO] Output written to: {OUTPUT_FILE}")
             except Exception as e:
                 print(f"[ERROR] Failed to write output file: {e}")
 
