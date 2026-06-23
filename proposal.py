@@ -52,29 +52,64 @@ def read_file(filepath):
 # Define file paths
 STAT_FILE = "/home/liujianzhong/proposal-source/stat.txt"
 STAT_CONTENT = read_file(STAT_FILE)
+PROPOSAL_COUNT = "10"
 
 # System prompt
 SYSTEM_PROMPT = """
 你是一位**PostgreSQL优化器内核专家**和**pgvector向量数据库资深架构师**，精通：
-- pgvector扩展的内部实现机制（IVFFlat/HNSW索引构建、查询执行流程、代价估算模型）
+- pgvector扩展的内部实现机制（HNSW/IVFFlat索引构建、查询执行流程、代价估算模型）
 - PostgreSQL查询优化器的行为特性与局限性
 - 向量标量混合查询的各类性能瓶颈与解决方案
 - pg_hint_plan扩展的精确使用方法
 - 大规模向量数据集的查询性能调优技术
 """
 
-PROMPTS = [
+TEMPLATE_CONTENT = """
+```json
+{
+  "strategy_id": <1 - PROPOSAL_COUNT>,
+  "name": "策略简要名称",
+  "description": "结合本数据分布（选择性约36.4%）说明该策略的设计思想、优点及潜在代价，务必引用选择性数值。",
+  "vector_index_used": "索引名，如 my_table_image_vec_idx 或 null（表示不使用向量索引，需精确搜索）",
+  "index_parameters": {
+    "type": "HNSW 或 IVFFlat 或 none",
+    "ef_search": <仅HNSW,HNSW搜索时动态参数，若有>,
+    "probes": <仅IVFFlat,IVFFlat探测数，若设定>,
+    "distance_type": "L2 / inner_product / cosine"
+  },
+  "filter_strategy": "pre-filter / post-filter / hybrid(说明) / two-phase",
+  "sql_rewrite_required": true/false,
+  "rewritten_sql": "若需要改写，提供完整 SQL；若不需要，设为空字符串",
+  "hint": "若使用 pg_hint_plan，给出准确提示字符串；否则为空字符串。提示需严格遵循 pg_hint_plan 语法。",
+  "refill_fallback_required": true/false,
+  "refill_parameters": {
+    "hnsw.iterative_scan": <仅HNSW>,
+    "hnsw.max_scan_tuples": <仅HNSW>,
+    "ivfflat.iterative_scan": <仅IVFFlat>,
+    "ivfflat.max_probes": <仅IVFFlat>
+  },
+  "notes": "补充说明，如执行边界、回退条件、对统计信息的依赖、适用场景限制等，不超过150字。"
+}
+```
 """
-请根据下面提供的**向量标量混合查询**、**数据库元数据**和**表统计信息**，生成 **5 个混合查询执行策略**。
+
+PROMPTS = [
+f"""
+请根据下面提供的**向量标量混合查询**、**数据库元数据**和**表统计信息**，生成 **{PROPOSAL_COUNT} 个混合查询执行策略**。
 - 每个策略必须明确基于统计信息中的选择性估算
 - 策略覆盖关键技术方向（例如：索引选择差异、过滤时机差异、查询重写差异、近似/精确回退、参数调优、部分索引等）。
 - 所有策略使用统一 JSON 数组输出，严格遵守给定的 Schema，不要输出任何额外的解释文字。
 
 *PostgreSQL版本为15.5，pgvector版本为0.8.1，pg_hint_plan版本为1.5.1。*
 
-## 目标混合查询
+## 目标
 
 向量标量混合查询：同时包含标量过滤条件与向量相似度搜索。
+
+### 生成查询执行策略的目标
+为混合查询生成的查询执行策略，应综合满足：
+1. 高召回率
+2. 高QPS（性能要求）
 
 ### 查询语句
 ```sql
@@ -86,7 +121,7 @@ PROMPTS = [
 ### my_table 表结构
 
 ```
-                                            Table "public.my_table"
+                                             Table "public.my_table"
   Column   |    Type     | Collation | Nullable | Default | Storage  | Compression | Stats target | Description
 -----------+-------------+-----------+----------+---------+----------+-------------+--------------+-------------
  id        | integer     |           | not null |         | plain    |             |              |
@@ -94,14 +129,12 @@ PROMPTS = [
  image_vec | vector(128) |           |          |         | external |             |              |
 Indexes:
     "my_table_pkey" PRIMARY KEY, btree (id)
-    "idx_my_table_image_vec_hnsw" hnsw (image_vec vector_l2_ops)
-    "idx_my_table_image_vec_ivfflat" ivfflat (image_vec)
+    "my_table_image_vec_idx" hnsw (image_vec vector_l2_ops) WITH (m='32', ef_construction='300')
 Access method: heap
 ```
 
 - 向量索引：
-  - `idx_my_table_image_vec_hnsw`：HNSW 索引，使用 L2 距离
-  - `idx_my_table_image_vec_ivfflat`：IVFFlat 索引，未显式指定距离函数（默认与操作符对齐）
+  - `my_table_image_vec_idx`：HNSW 索引，使用 L2 距离
 - 存储引擎：堆表
 
 
@@ -118,7 +151,7 @@ Access method: heap
 
 1. **pgvector扩展核心特性**：
    - 支持L2距离、内积、余弦相似度三种向量距离计算
-   - 提供IVFFlat、HNSW两种主要向量索引类型及其适用场景
+   - 提供HNSW、IVFFlat两种主要向量索引类型及其适用场景
    - 支持精确搜索(Sequential Scan)和近似最近邻搜索(ANN)
    - 支持向量维度最高可达65535维(不同版本略有差异)
    - 支持向量与标量字段的联合查询
@@ -145,46 +178,36 @@ Access method: heap
 2. 查询计划/策略的具体内容，参考如下：
 	- 使用什么向量索引
 	- 使用的向量索引的参数
+        + HNSW索引:
+            * hnsw.ef_search : 搜索时探索的邻居数
+        + IVFFlat索引:
+            * ivfflat.probes : 搜索时访问的聚类中心数量
 	- 使用post-filter还是pre-filter
 	- 是否需要SQL改写(SQL Rewrite)
 	- 如果需要SQL改写，改写后的SQL内容
 	- 基于pg_hint_plant的HINT等
 	- 是否需要Refill Fallback（通过迭代扫描来实现）
-	- 如果需要迭代扫描，相关的参数值设置
+	- 如果需要迭代扫描，相关的参数值设置，具体包括：
+        + HNSW索引:
+            * hnsw.iterative_scan : 迭代扫描模式,取值范围: off、strict_order、relaxed_order
+            * hnsw.max_scan_tuples : 单次查询最多扫描的向量数量,取值范围: 1~1000000; 默认值:20000
+        + IVFFlat索引:
+            * ivfflat.iterative_scan : 迭代扫描模式,取值范围: off、strict_order、relaxed_order
+            * ivfflat.max_probes : 单次查询最多探测的聚类中心数量,取值范围: 1~nlist; 默认值:65535
 3. 查询策略的具体内容中可以包含概要描述
 4. 查询计划/策略的具体内容中可以包含其他你认为必要的内容
+5. 一般情况下,仅在使用Pre-Filter的情况下，需要使用到HINT或SQL改写。即：通过HINT或SQL改写(或者两者结合)来实现Pre-Filter
+6. 不同的参数取值组合，被视为不同的查询计划/策略。你可以通过不同的参数取值组合来生成更多的可能更有的查询策略。
+
+**输出内容中参数取值的参考**
+- hnsw.ef_search: 取值范围：1 ~ 1000（整数），且必须大于查询的 LIMIT 值。影响：
+    * 值越大：搜索遍历的候选点越多，召回率越高，但查询延迟线性上升。
+    * 值越小：查询速度越快（QPS越高），但漏检最近邻的概率升高。
+- ivfflat.probes: 默认值：1，取值范围：1 ~ lists总数。影响：
+    * 值越大：扫描的桶越多，召回率越高，但查询耗时近似线性上升。
 
 **输出内容模板**
-```json
-{
-  "strategy_id": <1-5>,
-  "name": "策略简要名称",
-  "description": "结合本数据分布（选择性约36.4%）说明该策略的设计思想、优点及潜在代价，务必引用选择性数值。",
-  "vector_index_used": "索引名，如 idx_my_table_image_vec_hnsw 或 idx_my_table_image_vec_ivfflat 或 null（表示不使用，需精确搜索）",
-  "index_parameters": {
-    "type": "HNSW 或 IVFFlat 或 none",
-    "m": <仅HNSW>,
-    "ef_construction": <仅HNSW>,
-    "ef_search": <HNSW搜索时动态参数，若有>,
-    "lists": <仅IVFFlat>,
-    "probes": <IVFFlat探测数，若设定>,
-    "distance_type": "L2 / inner_product / cosine"
-  },
-  "filter_strategy": "pre-filter / post-filter / hybrid(说明) / two-phase",
-  "sql_rewrite_required": true/false,
-  "rewritten_sql": "若需要改写，提供完整 SQL；若不需要，设为空字符串",
-  "hint": "若使用 pg_hint_plan，给出准确提示字符串；否则为空字符串。提示需严格遵循 pg_hint_plan 语法。",
-  "refill_fallback_required": true/false,
-  "refill_parameters": {
-    "initial_limit": <初始 LIMIT，若使用 refill>,
-    "final_limit": 100,
-    "refill_multiplier": <每次扩展的倍数，如 2.0>,
-    "max_iterations": <最大迭代次数>,
-    "min_result_threshold": <满足标量过滤的最少行数阈值，达到即停止>
-  },
-  "notes": "补充说明，如执行边界、回退条件、对统计信息的依赖、适用场景限制等，不超过150字。"
-}
-```
+{TEMPLATE_CONTENT}
 注：仅输出JSON数组，不附带任何说明。
 """,
 ]
@@ -283,11 +306,11 @@ def main():
         {"role": "system", "content": SYSTEM_PROMPT}
     ]
 
-    # Replace placeholders in prompts with actual values
-    processed_prompts = [p.replace("{SQL_CONTENT}", SQL_CONTENT).replace("{STAT_CONTENT}", STAT_CONTENT) for p in PROMPTS]
+    # # Replace placeholders in prompts with actual values
+    # processed_prompts = [p.replace("{SQL_CONTENT}", SQL_CONTENT).replace("{STAT_CONTENT}", STAT_CONTENT).replace("{PROPOSAL_COUNT}", PROPOSAL_COUNT) for p in PROMPTS]
 
     # Process each prompt
-    for i, prompt in enumerate(processed_prompts):
+    for i, prompt in enumerate(PROMPTS):
         print(f"\n[INFO] Prompt#{i+1} prompt length: {len(prompt)}: (SQL content length: {len(SQL_CONTENT)})")
 
         # Record client start time (before sending request)
