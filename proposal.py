@@ -52,7 +52,7 @@ def read_file(filepath):
 # Define file paths
 STAT_FILE = "/home/liujianzhong/proposal-source/stat.txt"
 STAT_CONTENT = read_file(STAT_FILE)
-PROPOSAL_COUNT = "10"
+PROPOSAL_COUNT = "15"
 
 # System prompt
 SYSTEM_PROMPT = """
@@ -70,7 +70,7 @@ TEMPLATE_CONTENT = """
   "strategy_id": <1 - PROPOSAL_COUNT>,
   "name": "策略简要名称",
   "description": "结合本数据分布（选择性约36.4%）说明该策略的设计思想、优点及潜在代价，务必引用选择性数值。",
-  "vector_index_used": "索引名，如 my_table_image_vec_idx 或 null（表示不使用向量索引，需精确搜索）",
+  "vector_index_used": "索引名，如 my_table_image_vec_idx 或 my_table_ivf_image_vec_idx 或 null（表示不使用向量索引，需精确搜索）",
   "index_parameters": {
     "type": "HNSW 或 IVFFlat 或 none",
     "ef_search": <仅HNSW,HNSW搜索时动态参数，若有>,
@@ -130,11 +130,13 @@ f"""
 Indexes:
     "my_table_pkey" PRIMARY KEY, btree (id)
     "my_table_image_vec_idx" hnsw (image_vec vector_l2_ops) WITH (m='32', ef_construction='300')
+    "my_table_ivf_image_vec_idx" ivfflat (image_vec vector_l2_ops) WITH (lists='1000')
 Access method: heap
 ```
 
 - 向量索引：
-  - `my_table_image_vec_idx`：HNSW 索引，使用 L2 距离
+  - `my_table_image_vec_idx`：HNSW 索引，使用 L2 距离，参数：m='32', ef_construction='300'
+  - `my_table_ivf_image_vec_idx`：IVFFlat 索引，使用 L2 距离，参数：lists='1000'
 - 存储引擎：堆表
 
 
@@ -199,7 +201,7 @@ Access method: heap
 5. 一般情况下,仅在使用Pre-Filter的情况下，需要使用到HINT或SQL改写。即：通过HINT或SQL改写(或者两者结合)来实现Pre-Filter
 6. 不同的参数取值组合，被视为不同的查询计划/策略。你可以通过不同的参数取值组合来生成更多的可能更有的查询策略。
 
-**输出内容中参数取值的参考**
+**输出内容中参数取值的参考：（请遵循这里的参考）**
 - hnsw.ef_search: 取值范围：1 ~ 1000（整数），且必须大于查询的 LIMIT 值。影响：
     * 值越大：搜索遍历的候选点越多，召回率越高，但查询延迟线性上升。
     * 值越小：查询速度越快（QPS越高），但漏检最近邻的概率升高。
