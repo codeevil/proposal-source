@@ -86,7 +86,7 @@ TEMPLATE_CONTENT = """
     "refill_parameters": {
       "hnsw.iterative_scan": "字符串，off / strict_order / relaxed_order，仅HNSW有效，其余为null",
       "hnsw.max_scan_tuples": "整数，仅HNSW有效，其余为null",
-      "ivfflat.iterative_scan": "字符串，off / strict_order / relaxed_order，仅IVFFlat有效，其余为null",
+      "ivfflat.iterative_scan": "字符串，off / relaxed_order，仅IVFFlat有效，其余为null",
       "ivfflat.max_probes": "整数，仅IVFFlat有效，其余为null"
     },
     "notes": "字符串，补充说明执行边界、回退条件、适用场景限制等，不超过150字"
@@ -235,6 +235,7 @@ Access method: heap
 - 启用条件：Post-Filter场景下，标量过滤可能导致结果行数不足LIMIT时启用
 - 模式选择：
   - `strict_order`：严格保持距离排序，召回准确，性能稍低，适合排序精度要求高的场景
+    + **注意**：IVFFlat不支持`strict_order`
   - `relaxed_order`：放宽排序约束，性能更优，优先满足行数要求，适合对排序精度要求一般的场景
 - HNSW 迭代参数：
   - `hnsw.max_scan_tuples`：单次查询最大扫描向量数，取值建议 = 目标返回行数 / 标量选择性 * 倍率
