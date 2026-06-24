@@ -66,60 +66,60 @@ SYSTEM_PROMPT = """
 
 TEMPLATE_CONTENT = """
 ```json
-{
-  "strategy_id": <1 - PROPOSAL_COUNT>,
-  "name": "策略简要名称",
-  "description": "结合本数据分布（选择性约36.4%）说明该策略的设计思想、优点及潜在代价，务必引用选择性数值。",
-  "vector_index_used": "索引名，如 my_table_image_vec_idx 或 my_table_ivf_image_vec_idx 或 null（表示不使用向量索引，需精确搜索）",
-  "index_parameters": {
-    "type": "HNSW 或 IVFFlat 或 none",
-    "ef_search": <仅HNSW,HNSW搜索时动态参数，若有>,
-    "probes": <仅IVFFlat,IVFFlat探测数，若设定>,
-    "distance_type": "L2 / inner_product / cosine"
-  },
-  "filter_strategy": "pre-filter / post-filter",
-  "sql_rewrite_required": true/false,
-  "rewritten_sql": "若需要改写，提供完整 SQL；若不需要，设为空字符串",
-  "hint": "若使用 pg_hint_plan，给出准确提示字符串；否则为空字符串。提示需严格遵循 pg_hint_plan 语法。",
-  "refill_fallback_required": true/false,
-  "refill_parameters": {
-    "hnsw.iterative_scan": <仅HNSW>,
-    "hnsw.max_scan_tuples": <仅HNSW>,
-    "ivfflat.iterative_scan": <仅IVFFlat>,
-    "ivfflat.max_probes": <仅IVFFlat>
-  },
-  "notes": "补充说明，如执行边界、回退条件、对统计信息的依赖、适用场景限制等，不超过150字。"
-}
+[
+  {
+    "strategy_id": <整数，1 ~ {PROPOSAL_COUNT}，按顺序编号>,
+    "name": "字符串，策略简要名称，不超过20字",
+    "description": "字符串，结合数据分布与选择性数值，说明设计思想、优势与潜在代价，必须明确引用选择性数值",
+    "vector_index_used": "字符串，索引名：my_table_image_vec_idx / my_table_ivf_image_vec_idx / null（无索引，精确搜索）",
+    "index_parameters": {
+      "type": "字符串，HNSW / IVFFlat / none",
+      "ef_search": "整数，仅HNSW有效，其余为null",
+      "probes": "整数，仅IVFFlat有效，其余为null",
+      "distance_type": "字符串，L2 / inner_product / cosine，与原查询保持一致"
+    },
+    "filter_strategy": "字符串，pre-filter / post-filter",
+    "sql_rewrite_required": "布尔值，true / false",
+    "rewritten_sql": "字符串，sql_rewrite_required为true时填写完整改写后的SQL；否则为空字符串",
+    "hint": "字符串，使用pg_hint_plan时填写准确提示语句；否则为空字符串，严格遵循语法规范",
+    "refill_fallback_required": "布尔值，true / false",
+    "refill_parameters": {
+      "hnsw.iterative_scan": "字符串，off / strict_order / relaxed_order，仅HNSW有效，其余为null",
+      "hnsw.max_scan_tuples": "整数，仅HNSW有效，其余为null",
+      "ivfflat.iterative_scan": "字符串，off / strict_order / relaxed_order，仅IVFFlat有效，其余为null",
+      "ivfflat.max_probes": "整数，仅IVFFlat有效，其余为null"
+    },
+    "notes": "字符串，补充说明执行边界、回退条件、适用场景限制等，不超过150字"
+  }
+]
 ```
 """
 
+# "你是PostgreSQL+pgvector领域的数据库优化专家，精通向量标量混合查询的执行计划优化、索引调优与代价估算。"
 PROMPTS = [
 f"""
-请根据下面提供的**向量标量混合查询**、**数据库元数据**和**表统计信息**，生成 **{PROPOSAL_COUNT} 个混合查询执行策略**。
-- 每个策略必须明确基于统计信息中的选择性估算
-- 策略覆盖关键技术方向（例如：索引选择差异、过滤时机差异、查询重写差异、近似/精确回退、参数调优、部分索引等）。
-- 所有策略使用统一 JSON 数组输出，严格遵守给定的 Schema，不要输出任何额外的解释文字。
+请基于下方提供的向量标量混合查询、数据库元数据、表统计信息，严格按照要求生成 **{PROPOSAL_COUNT} 个差异化的混合查询执行策略**。
 
-*PostgreSQL版本为15.5，pgvector版本为0.8.1，pg_hint_plan版本为1.5.1。*
+所有策略必须基于统计信息中的选择性估算推导，覆盖不同技术方向与权衡偏好；最终仅输出符合指定Schema的JSON数组，禁止输出任何额外解释、说明或markdown格式。
 
-## 目标
+---
 
-向量标量混合查询：同时包含标量过滤条件与向量相似度搜索。
+## 一、环境版本约束（硬约束，不可违背）
+- PostgreSQL 版本：15.5
+- pgvector 版本：0.8.1
+- pg_hint_plan 版本：1.5.1
+- 存储引擎：堆表（Heap）
 
-### 生成查询执行策略的目标
-为混合查询生成的查询执行策略，应综合满足：
-1. 高召回率
-2. 高QPS（性能要求）
+---
 
-### 查询语句
+## 二、输入信息说明
+### 1. 目标查询语句
+向量标量混合查询（同时包含标量过滤条件与向量相似度搜索）：
 ```sql
 {SQL_CONTENT}
 ```
 
-## 数据库元数据与统计信息
-
-### my_table 表结构
-
+### 2. 数据库元数据（表结构与索引）
 ```
                                              Table "public.my_table"
   Column   |    Type     | Collation | Nullable | Default | Storage  | Compression | Stats target | Description
@@ -134,91 +134,166 @@ Indexes:
 Access method: heap
 ```
 
-- 向量索引：
-  - `my_table_image_vec_idx`：HNSW 索引，使用 L2 距离，参数：m=32, ef_construction=300
-  - `my_table_ivf_image_vec_idx`：IVFFlat 索引，使用 L2 距离，参数：lists=1000
-- 存储引擎：堆表
+**索引明细**：
+- HNSW索引：`my_table_image_vec_idx`，L2距离算子，构建参数 m=32、ef_construction=300
+- IVFFlat索引：`my_table_ivf_image_vec_idx`，L2距离算子，构建参数 lists=1000
 
+### 3. 表统计信息
+- 表总行数：1000000 行
+- 向量维度：128 维
+- 数据分布与标量条件选择性：
+```
+{STAT_CONTENT}
+```
 
-### 统计信息 ###
+---
 
-- my_table表总行数： 1000000行
-- 向量字段(embddding)维数：128维
-- 数据分布：
-	```
-    {STAT_CONTENT}
-	```
+## 三、核心优化目标
+生成的执行策略需在两个核心目标间做差异化权衡，覆盖不同偏好的策略组合：
+1. **高召回率**：向量搜索返回的结果中，真实最近邻的占比尽可能高，避免漏检最优结果
+2. **高QPS**：单查询延迟尽可能低，单位时间可处理的查询量尽可能大
 
-## 必备知识
+策略需覆盖「极致QPS、平衡型、极致召回」三类偏好，同时结合标量条件的选择性，选择最优的执行路径。
 
-1. **pgvector扩展核心特性**：
-   - 支持L2距离、内积、余弦相似度三种向量距离计算
-   - 提供HNSW、IVFFlat两种主要向量索引类型及其适用场景
-   - 支持精确搜索(Sequential Scan)和近似最近邻搜索(ANN)
-   - 支持向量维度最高可达65535维(不同版本略有差异)
-   - 支持向量与标量字段的联合查询
+---
 
-2. **混合查询性能瓶颈**：
-   - 先过滤后向量搜索：标量过滤后结果集小但无法有效利用向量索引
-   - 先向量搜索后过滤：向量索引高效但可能返回大量不满足标量条件的结果
-   - 联合索引限制：pgvector不支持向量字段与标量字段的B树联合索引
-   - 执行计划偏差：PostgreSQL优化器对向量索引的代价估算不准确
+## 四、必备领域知识库
+### 1. pgvector 核心特性
+- 支持L2距离、内积、余弦相似度三种向量距离计算
+- 提供HNSW、IVFFlat两类近似最近邻（ANN）索引，同时支持精确搜索（顺序扫描）
+- 支持向量字段与标量字段的联合查询，但原生优化器对向量索引的代价估算存在偏差
+- 向量维度最高支持65535维，本场景固定为128维
 
-3. **优化技术池**：
-   - 索引选择：HNSW vs IVFFlat 及参数调优
-   - 过滤时机：pre-filter, post-filter
-   - 查询重写：子查询/CTE 强制执行边界、LATERAL JOIN 逐行驱动
-   - 近似回退 (Refill Fallback)：逐步扩大 ANN 的 LIMIT 直到满足标量过滤后所需行数
-   - 执行计划提示：pg_hint_plan 强制索引扫描、禁止 SeqScan 等
-   - 索引提示：使用pg_hint_plan强制优化器选择正确的执行计划
-   - 联合查询重写：使用CTE、子查询、LATERAL JOIN等语法优化执行顺序
-   - 重排序技术：先ANN搜索返回更多结果，再进行标量过滤和重排序
+### 2. 混合查询执行路径对比
+| 执行路径       | 原理                                  | 适用场景                     | 优势                  | 劣势                          |
+|----------------|---------------------------------------|------------------------------|-----------------------|-------------------------------|
+| Post-Filter    | 先执行向量ANN搜索，再对标量结果过滤   | 低选择性（过滤后剩余>50%）   | 向量索引效率最大化    | 过滤后可能出现结果行数不足    |
+| Pre-Filter     | 先执行标量过滤，再对结果集做向量搜索  | 高选择性（过滤后剩余<10%）   | 向量计算量大幅降低    | 结果集过小时无法利用向量索引  |
+| 重排序扩大召回 | 先ANN返回N倍LIMIT结果，过滤后重排序   | 中选择性，召回要求高         | 召回率显著提升        | 延迟随扩大倍数线性上升        |
+| 迭代回退       | 自动扩大向量搜索范围直到满足行数要求  | 中低选择性，行数稳定性要求高 | 单次查询即可满足行数  | 极端场景下延迟波动大          |
 
-## 输出内容要求
+### 3. 优化技术池
+- **索引选型**：HNSW / IVFFlat / 无索引精确搜索，及运行时参数调优
+- **过滤时机**：Post-Filter / Pre-Filter
+- **查询重写**：子查询、CTE、LATERAL JOIN 等方式强制执行执行顺序
+- **迭代回退（Refill Fallback）**：通过迭代扫描自动扩大搜索范围，补足过滤后缺失的行数
+- **执行计划提示**：通过pg_hint_plan强制索引选择、禁止顺序扫描、固定连接顺序
+- **部分索引**：利用带标量条件的向量部分索引，实现Pre-Filter效果同时保留向量索引效率
+- **近似转精确回退**：ANN结果不足时自动回退为精确顺序扫描
 
-1. 使用JSON格式，描述查询计划/策略的具体内容
-2. 查询计划/策略的具体内容，参考如下：
-	- 使用什么向量索引
-	- 使用的向量索引的参数
-        + HNSW索引:
-            * hnsw.ef_search : 搜索时探索的邻居数
-        + IVFFlat索引:
-            * ivfflat.probes : 搜索时访问的聚类中心数量
-	- 使用post-filter还是pre-filter
-	- 是否需要SQL改写(SQL Rewrite)
-	- 如果需要SQL改写，改写后的SQL内容
-	- 基于pg_hint_plant的HINT等
-	- 是否需要Refill Fallback（通过迭代扫描来实现）
-	- 如果需要迭代扫描，相关的参数值设置，具体包括：
-        + HNSW索引:
-            * hnsw.iterative_scan : 迭代扫描模式,取值范围: off、strict_order、relaxed_order
-            * hnsw.max_scan_tuples : 单次查询最多扫描的向量数量,取值范围: 1~1000000; 默认值:20000
-        + IVFFlat索引:
-            * ivfflat.iterative_scan : 迭代扫描模式,取值范围: off、strict_order、relaxed_order
-            * ivfflat.max_probes : 单次查询最多探测的聚类中心数量,取值范围: 1~nlist; 默认值:65535
-3. 查询策略的具体内容中可以包含概要描述
-4. 查询计划/策略的具体内容中可以包含其他你认为必要的内容
-5. 一般情况下,仅在使用Pre-Filter的情况下，需要使用到HINT或SQL改写。即：通过HINT或SQL改写(或者两者结合)来实现Pre-Filter
-6. 不同的参数取值组合，被视为不同的查询计划/策略。你可以通过不同的参数取值组合来生成更多的可能更有的查询策略。
+### 4. pg_hint_plan 语法参考
+- 强制指定索引：`/*+ IndexScan(表名 索引名) */`
+- 禁止顺序扫描：`/*+ NoSeqScan(表名) */`
+- 强制顺序扫描：`/*+ SeqScan(表名) */`
+- 提示需放置在SELECT关键字后，语法严格匹配
 
-**输出内容模板**
+### 5. SQL改写参考范式
+- Pre-Filter子查询写法（强制先过滤再向量排序）：
+  ```sql
+  SELECT * FROM (
+    SELECT * FROM my_table WHERE [标量过滤条件]
+  ) t
+  ORDER BY image_vec <-> '[查询向量]'
+  LIMIT [目标行数]
+  ```
+- LATERAL JOIN逐行向量搜索写法：
+  ```sql
+  SELECT t.*, v.distance
+  FROM (SELECT id FROM my_table WHERE [标量过滤条件]) t
+  JOIN LATERAL (
+    SELECT image_vec, image_vec <-> '[查询向量]' AS distance
+    FROM my_table
+    WHERE id = t.id
+  ) v ON true
+  ORDER BY v.distance
+  LIMIT [目标行数]
+  ```
+
+---
+
+## 五、策略生成核心原则
+### 1. 向量索引参数取值规则
+#### （1）HNSW 索引：hnsw.ef_search
+- 取值范围：1 ~ 1000（整数），**必须大于查询的LIMIT值**
+- 取值梯度（K为查询SQL LIMIT数值）：
+  - 极速档：K * 1.5 ~ K * 2 → 优先QPS，召回率一般
+  - 平衡档：K * 3 ~ K * 5 → 召回与性能均衡，推荐基线配置
+  - 高召回档：K * 8 ~ K * 10 → 优先召回率，延迟线性上升
+  - 极高召回档：100 ~ 200 → 小K值场景下最大化召回，上限1000
+- 影响规律：值越大，遍历候选点越多，召回率越高，查询延迟近似线性上升
+
+#### （2）IVFFlat 索引：ivfflat.probes
+- 取值范围：1 ~ 1000（与索引lists数一致），默认值1
+- 取值梯度（N为索引lists总数=1000）：
+  - 极速档：1 ~ 2 → 极致QPS，召回率最低
+  - 平衡档：N * 1% ~ N * 3%（10 ~ 30）→ 召回与性能均衡
+  - 高召回档：N * 5% ~ N * 10%（50 ~ 100）→ 召回率显著提升
+  - 极高召回档：N * 20% ~ N * 50%（200 ~ 500）→ 接近精确搜索，延迟大幅升高
+- 影响规律：值越大，扫描的聚类桶越多，召回率越高，查询耗时近似线性上升
+
+#### （3）迭代扫描（Refill Fallback）参数
+- 启用条件：Post-Filter场景下，标量过滤可能导致结果行数不足LIMIT时启用
+- 模式选择：
+  - `strict_order`：严格保持距离排序，召回准确，性能稍低，适合排序精度要求高的场景
+  - `relaxed_order`：放宽排序约束，性能更优，优先满足行数要求，适合对排序精度要求一般的场景
+- HNSW 迭代参数：
+  - `hnsw.max_scan_tuples`：单次查询最大扫描向量数，取值建议 = 目标返回行数 / 标量选择性 * 倍率
+    - 保守回退：目标行数 / 选择性 * 2
+    - 中等回退：目标行数 / 选择性 * 5
+    - 激进回退：20000（默认上限）
+  - 取值范围：1 ~ 1000000
+- IVFFlat 迭代参数：
+  - `ivfflat.max_probes`：迭代过程中最大探测聚类数，取值建议为初始probes的3~10倍，不超过lists总数
+  - 取值范围：1 ~ 1000
+
+### 2. 召回率与QPS平衡原则
+1. **选择性适配**：
+   - 高选择性（过滤后结果占比 < 10%）：优先Pre-Filter，减少向量计算量，大幅提升QPS；可搭配精确搜索
+   - 中选择性（10% ~ 50%）：优先Post-Filter + 适度扩大召回 + 迭代回退，平衡召回与性能
+   - 低选择性（> 50%）：优先Post-Filter + 标准参数，过滤开销低，最大化向量索引效率
+2. **索引选型适配**：
+   - QPS优先：选择HNSW + 低档位ef_search，或IVFFlat + probes=1
+   - 召回优先：选择HNSW + 高档位ef_search，或IVFFlat + 高比例probes
+   - 内存受限：优先选择IVFFlat（内存占用约为HNSW的1/3~1/2）
+3. **策略多样性要求**：
+   {PROPOSAL_COUNT}个策略必须覆盖以下至少6类方向，不得出现3个以上仅参数微调的同质化策略：
+   - 基线策略（HNSW/IVFFlat默认参数Post-Filter）
+   - HNSW参数梯度调优（低/中/高ef_search）
+   - IVFFlat参数梯度调优（低/中/高probes）
+   - Pre-Filter策略（子查询/CTE/LATERAL JOIN改写）
+   - 迭代回退策略（HNSW/IVFFlat + Refill Fallback）
+   - 特殊优化策略（精确搜索回退、重排序扩大召回、部分索引思路等）
+
+### 3. 其他通用规则
+- 仅Pre-Filter场景需要SQL改写或pg_hint_plan提示，用于强制执行先过滤后向量搜索的顺序
+- Post-Filter场景可直接通过pg_hint_plan指定向量索引，无需改写SQL
+- 每个策略的设计必须结合统计信息中的选择性数值，说明该选择性下策略的收益与代价
+- 所有参数取值必须符合版本约束，不得超出合法范围
+
+---
+
+## 六、输出格式与Schema
+### 输出要求
+- 仅输出JSON数组，数组包含{PROPOSAL_COUNT}个策略对象
+- 严格遵循下方Schema，字段名、类型完全匹配，无多余字段
+- 未使用的参数字段统一设为`null`，不得留空或省略
+
+### JSON Schema
 {TEMPLATE_CONTENT}
-注：仅输出JSON数组，不附带任何说明。
 
-## 遵循思路和原则
-为**向量标量混合查询**生成查询执行策略，请遵循如下思路和原则：
-1. 仅在使用pre-filter方式时，**可能**需要做SQL Rewrite
-2. 在使用post-filter方式时，可以在HINT中指定使用的索引
+---
 
-**输出内容中参数取值的参考：（请遵循这里的参考）**
-- hnsw.ef_search: 取值范围：1 ~ 1000（整数），且必须大于查询的 LIMIT 值。影响：
-    * 值越大：搜索遍历的候选点越多，召回率越高，但查询延迟线性上升。
-    * 值越小：查询速度越快（QPS越高），但漏检最近邻的概率升高。
-- ivfflat.probes: 默认值：1，取值范围：1 ~ lists总数。影响：
-    * 值越大：扫描的桶越多，召回率越高，但查询耗时近似线性上升。
-    * 值越小：扫描的桶越少，召回率越低，但查询耗时近似线性下降。
+## 七、输出强制校验规则
+1. 所有数值参数必须在合法范围内，ef_search必须大于查询LIMIT值
+2. 每个策略的description必须明确引用统计信息中的选择性数值，不得泛泛而谈
+3. Pre-Filter策略必须配套SQL改写或pg_hint_plan提示，确保执行顺序可控
+4. refill_fallback_required为true时，必须配置对应索引类型的迭代参数，且iterative_scan不得为off
+5. 策略之间必须有明确差异，禁止重复或高度同质化的策略
+6. 仅输出JSON数组，无任何前置、后置说明文字，无markdown格式，无代码块包裹
+```
 
-""",
+---
+"""
 ]
 
 
@@ -321,6 +396,7 @@ def main():
     # Process each prompt
     for i, prompt in enumerate(PROMPTS):
         print(f"\n[INFO] Prompt#{i+1} prompt length: {len(prompt)}: (SQL content length: {len(SQL_CONTENT)})")
+        print(f"------\n {prompt} \n")
 
         # Record client start time (before sending request)
         client_start_time = time.time()
