@@ -77,7 +77,7 @@ TEMPLATE_CONTENT = """
     "probes": <仅IVFFlat,IVFFlat探测数，若设定>,
     "distance_type": "L2 / inner_product / cosine"
   },
-  "filter_strategy": "pre-filter / post-filter / hybrid(说明) / two-phase",
+  "filter_strategy": "pre-filter / post-filter",
   "sql_rewrite_required": true/false,
   "rewritten_sql": "若需要改写，提供完整 SQL；若不需要，设为空字符串",
   "hint": "若使用 pg_hint_plan，给出准确提示字符串；否则为空字符串。提示需严格遵循 pg_hint_plan 语法。",
@@ -135,8 +135,8 @@ Access method: heap
 ```
 
 - 向量索引：
-  - `my_table_image_vec_idx`：HNSW 索引，使用 L2 距离，参数：m='32', ef_construction='300'
-  - `my_table_ivf_image_vec_idx`：IVFFlat 索引，使用 L2 距离，参数：lists='1000'
+  - `my_table_image_vec_idx`：HNSW 索引，使用 L2 距离，参数：m=32, ef_construction=300
+  - `my_table_ivf_image_vec_idx`：IVFFlat 索引，使用 L2 距离，参数：lists=1000
 - 存储引擎：堆表
 
 
@@ -166,7 +166,7 @@ Access method: heap
 
 3. **优化技术池**：
    - 索引选择：HNSW vs IVFFlat 及参数调优
-   - 过滤时机：pre-filter, post-filter, 两阶段混合
+   - 过滤时机：pre-filter, post-filter
    - 查询重写：子查询/CTE 强制执行边界、LATERAL JOIN 逐行驱动
    - 近似回退 (Refill Fallback)：逐步扩大 ANN 的 LIMIT 直到满足标量过滤后所需行数
    - 执行计划提示：pg_hint_plan 强制索引扫描、禁止 SeqScan 等
@@ -201,16 +201,23 @@ Access method: heap
 5. 一般情况下,仅在使用Pre-Filter的情况下，需要使用到HINT或SQL改写。即：通过HINT或SQL改写(或者两者结合)来实现Pre-Filter
 6. 不同的参数取值组合，被视为不同的查询计划/策略。你可以通过不同的参数取值组合来生成更多的可能更有的查询策略。
 
+**输出内容模板**
+{TEMPLATE_CONTENT}
+注：仅输出JSON数组，不附带任何说明。
+
+## 遵循思路和原则
+为**向量标量混合查询**生成查询执行策略，请遵循如下思路和原则：
+1. 仅在使用pre-filter方式时，**可能**需要做SQL Rewrite
+2. 在使用post-filter方式时，可以在HINT中指定使用的索引
+
 **输出内容中参数取值的参考：（请遵循这里的参考）**
 - hnsw.ef_search: 取值范围：1 ~ 1000（整数），且必须大于查询的 LIMIT 值。影响：
     * 值越大：搜索遍历的候选点越多，召回率越高，但查询延迟线性上升。
     * 值越小：查询速度越快（QPS越高），但漏检最近邻的概率升高。
 - ivfflat.probes: 默认值：1，取值范围：1 ~ lists总数。影响：
     * 值越大：扫描的桶越多，召回率越高，但查询耗时近似线性上升。
+    * 值越小：扫描的桶越少，召回率越低，但查询耗时近似线性下降。
 
-**输出内容模板**
-{TEMPLATE_CONTENT}
-注：仅输出JSON数组，不附带任何说明。
 """,
 ]
 
