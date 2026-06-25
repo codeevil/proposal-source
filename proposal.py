@@ -27,13 +27,15 @@ parser.add_argument("--output", "--output-file", type=str, required=True,
                     help="Output file path (required)")
 parser.add_argument("--sql", type=str, required=True,
                     help="SQL content (required)")
-# parser.add_argument("--stat", type=str, default="",
-#                     help="Statistics content (optional, default: empty)")
+parser.add_argument("--mode", type=str, default="standard",
+                    choices=["extreme", "standard", "balance"],
+                    help="Generation mode: extreme (15 diverse strategies), "
+                         "standard (default, 10 strategies), balance (6 balanced strategies)")
 args = parser.parse_args()
 
 OUTPUT_FILE = args.output
 SQL_CONTENT = args.sql
-# STAT_CONTENT = args.stat
+MODE = args.mode
 
 
 # Read file contents
@@ -52,7 +54,15 @@ def read_file(filepath):
 # Define file paths
 STAT_FILE = "/home/liujianzhong/proposal-source/stat.txt"
 STAT_CONTENT = read_file(STAT_FILE)
-PROPOSAL_COUNT = "15"
+
+# Mode-based proposal count
+MODE_CONFIG = {
+    "extreme": {"count": "15", "label": "极端多样"},
+    "standard": {"count": "10", "label": "标准"},
+    "balance": {"count": "6", "label": "平衡"},
+}
+PROPOSAL_COUNT = MODE_CONFIG.get(MODE, MODE_CONFIG["standard"])["count"]
+MODE_LABEL = MODE_CONFIG.get(MODE, MODE_CONFIG["standard"])["label"]
 
 # System prompt
 SYSTEM_PROMPT = """
@@ -175,7 +185,7 @@ Access method: heap
 ### 3. 优化技术池
 - **索引选型**：HNSW / IVFFlat / 无索引精确搜索，及运行时参数调优
 - **过滤时机**：Post-Filter / Pre-Filter
-- **查询重写**：子查询、CTE、LATERAL JOIN 等方式强制执行执行顺序
+- **查询重写**：子查询加 OFFSET 0 、CTE 等方式强制执行执行顺序
 - **迭代回退（Refill Fallback）**：通过迭代扫描自动扩大搜索范围，补足过滤后缺失的行数
 - **执行计划提示**：通过pg_hint_plan强制索引选择、禁止顺序扫描、固定连接顺序
 - **部分索引**：利用带标量条件的向量部分索引，实现Pre-Filter效果同时保留向量索引效率
@@ -188,25 +198,32 @@ Access method: heap
 - 提示需放置在SELECT关键字后，语法严格匹配
 
 ### 5. SQL改写参考范式
-- Pre-Filter子查询写法（强制先过滤再向量排序）：
+- 物化 CTE 的方式
+  举例：
   ```sql
-  SELECT * FROM (
-    SELECT * FROM my_table WHERE [标量过滤条件]
-  ) t
-  ORDER BY image_vec <-> '[查询向量]'
-  LIMIT [目标行数]
+  WITH filtered AS MATERIALIZED (
+    SELECT id, image_vec 
+    FROM my_table 
+    WHERE equal = 23
+  )
+  SELECT id 
+  FROM filtered 
+  ORDER BY image_vec <-> (SELECT image_vec FROM my_table WHERE id = 731480) 
+  LIMIT 100;
   ```
-- LATERAL JOIN逐行向量搜索写法：
+
+- 子查询加 OFFSET 0 优化屏障的方式
+  举例：
   ```sql
-  SELECT t.*, v.distance
-  FROM (SELECT id FROM my_table WHERE [标量过滤条件]) t
-  JOIN LATERAL (
-    SELECT image_vec, image_vec <-> '[查询向量]' AS distance
-    FROM my_table
-    WHERE id = t.id
-  ) v ON true
-  ORDER BY v.distance
-  LIMIT [目标行数]
+  SELECT id 
+  FROM (
+    SELECT id, image_vec 
+    FROM my_table 
+    WHERE equal = 23 
+    OFFSET 0
+  ) t
+  ORDER BY image_vec <-> (SELECT image_vec FROM my_table WHERE id = 731480) 
+  LIMIT 100;
   ```
 
 ---
@@ -261,12 +278,13 @@ Access method: heap
    - 基线策略（HNSW/IVFFlat默认参数Post-Filter）
    - HNSW参数梯度调优（低/中/高ef_search）
    - IVFFlat参数梯度调优（低/中/高probes）
-   - Pre-Filter策略（子查询/CTE/LATERAL JOIN改写）
+   - Pre-Filter策略（子查询加 OFFSET 0 的方式/CTE的方式）
    - 迭代回退策略（HNSW/IVFFlat + Refill Fallback）
    - 特殊优化策略（精确搜索回退、重排序扩大召回、部分索引思路等）
 
 ### 3. 其他通用规则
 - 仅Pre-Filter场景需要SQL改写或pg_hint_plan提示，用于强制执行先过滤后向量搜索的顺序
+    + 对SQL改写，请严格按照**四、必备领域知识库** 的**5. SQL改写参考范式**中所列出来的范式之一进行改写
 - Post-Filter场景可直接通过pg_hint_plan指定向量索引，无需改写SQL
 - 每个策略的设计必须结合统计信息中的选择性数值，说明该选择性下策略的收益与代价
 - 所有参数取值必须符合版本约束，不得超出合法范围
@@ -288,10 +306,10 @@ Access method: heap
 1. 所有数值参数必须在合法范围内，ef_search必须大于查询LIMIT值
 2. 每个策略的description必须明确引用统计信息中的选择性数值，不得泛泛而谈
 3. Pre-Filter策略必须配套SQL改写或pg_hint_plan提示，确保执行顺序可控
-4. refill_fallback_required为true时，必须配置对应索引类型的迭代参数，且iterative_scan不得为off
-5. 策略之间必须有明确差异，禁止重复或高度同质化的策略
-6. 仅输出JSON数组，无任何前置、后置说明文字，无markdown格式，无代码块包裹
-```
+4. 如果使用Pre-Filter,涉及到SQL改写，请严格按照**四、必备领域知识库** 的**5. SQL改写参考范式**中所列出来的范式，选用其中的方式之一进行改写
+5. refill_fallback_required为true时，必须配置对应索引类型的迭代参数，且iterative_scan不得为off
+6. 策略之间必须有明确差异，禁止重复或高度同质化的策略
+7. 仅输出JSON数组，无任何前置、后置说明文字，无markdown格式，无代码块包裹
 
 ---
 """
@@ -397,7 +415,7 @@ def main():
     # Process each prompt
     for i, prompt in enumerate(PROMPTS):
         print(f"\n[INFO] Prompt#{i+1} prompt length: {len(prompt)}: (SQL content length: {len(SQL_CONTENT)})")
-        print(f"------\n {prompt} \n")
+        # print(f"------\n {prompt} \n")
 
         # Record client start time (before sending request)
         client_start_time = time.time()
