@@ -198,17 +198,18 @@ Access method: heap
 - 提示需放置在SELECT关键字后，语法严格匹配
 
 ### 5. SQL改写参考范式
+**仅Pre-Filter场景需要SQL改写，SQL改写需严格遵循这里的参考范式**
 - 物化 CTE 的方式
   举例：
   ```sql
   WITH filtered AS MATERIALIZED (
     SELECT id, image_vec 
     FROM my_table 
-    WHERE equal = 23
+    WHERE [标量过滤条件]
   )
   SELECT id 
   FROM filtered 
-  ORDER BY image_vec <-> (SELECT image_vec FROM my_table WHERE id = 731480) 
+  ORDER BY image_vec <-> (SELECT image_vec FROM my_table WHERE [id字段过滤条件]) 
   LIMIT 100;
   ```
 
@@ -222,7 +223,7 @@ Access method: heap
     WHERE equal = 23 
     OFFSET 0
   ) t
-  ORDER BY image_vec <-> (SELECT image_vec FROM my_table WHERE id = 731480) 
+  ORDER BY image_vec <-> (SELECT image_vec FROM my_table WHERE [id字段过滤条件]) 
   LIMIT 100;
   ```
 
@@ -284,7 +285,7 @@ Access method: heap
 
 ### 3. 其他通用规则
 - 仅Pre-Filter场景需要SQL改写或pg_hint_plan提示，用于强制执行先过滤后向量搜索的顺序
-    + 对SQL改写，请严格按照**四、必备领域知识库** 的**5. SQL改写参考范式**中所列出来的范式之一进行改写
+- Pre-Filter场景的SQL改写，请严格按照**SQL改写参考范式**中所列出来的范式进行改写
 - Post-Filter场景可直接通过pg_hint_plan指定向量索引，无需改写SQL
 - 每个策略的设计必须结合统计信息中的选择性数值，说明该选择性下策略的收益与代价
 - 所有参数取值必须符合版本约束，不得超出合法范围
@@ -306,7 +307,7 @@ Access method: heap
 1. 所有数值参数必须在合法范围内，ef_search必须大于查询LIMIT值
 2. 每个策略的description必须明确引用统计信息中的选择性数值，不得泛泛而谈
 3. Pre-Filter策略必须配套SQL改写或pg_hint_plan提示，确保执行顺序可控
-4. 如果使用Pre-Filter,涉及到SQL改写，请严格按照**四、必备领域知识库** 的**5. SQL改写参考范式**中所列出来的范式，选用其中的方式之一进行改写
+4. 如果使用Pre-Filter,涉及到SQL改写，请严格按照**SQL改写参考范式**中所列出来的范式进行改写
 5. refill_fallback_required为true时，必须配置对应索引类型的迭代参数，且iterative_scan不得为off
 6. 策略之间必须有明确差异，禁止重复或高度同质化的策略
 7. 仅输出JSON数组，无任何前置、后置说明文字，无markdown格式，无代码块包裹
