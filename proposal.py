@@ -81,7 +81,7 @@ TEMPLATE_CONTENT = """
     "strategy_id": <整数，1 ~ {PROPOSAL_COUNT}，按顺序编号>,
     "name": "字符串，策略简要名称，不超过20字",
     "description": "字符串，结合数据分布与选择性数值，说明设计思想、优势与潜在代价，必须明确引用选择性数值",
-    "vector_index_used": "字符串，索引名：my_table_image_vec_idx / my_table_ivf_image_vec_idx / null（无索引，精确搜索）",
+    "vector_index_used": "字符串，索引名：my_table_image_vec_idx / my_table_ivf_image_vec_idx / null（无索引，精确搜索），如果`filter_strategy`为`post-filter`，则`vector_index_used`不得为`null`",
     "index_parameters": {
       "type": "字符串，HNSW / IVFFlat / none",
       "ef_search": "整数，仅HNSW有效，其余为null",
@@ -287,6 +287,7 @@ Access method: heap
 - 仅Pre-Filter场景需要SQL改写或pg_hint_plan提示，用于强制执行先过滤后向量搜索的顺序
 - Pre-Filter场景的SQL改写，请严格按照**SQL改写参考范式**中所列出来的范式进行改写
 - Post-Filter场景可直接通过pg_hint_plan指定向量索引，无需改写SQL
+- 使用Post-Filter的情况下，**必须使用**向量索引，**必须指定**向量索引和向量索引参数
 - 每个策略的设计必须结合统计信息中的选择性数值，说明该选择性下策略的收益与代价
 - 所有参数取值必须符合版本约束，不得超出合法范围
 
@@ -321,7 +322,10 @@ Access method: heap
 4. 如果使用Pre-Filter,涉及到SQL改写，请严格按照**SQL改写参考范式**中所列出来的范式进行改写
 5. refill_fallback_required为true时，必须配置对应索引类型的迭代参数，且iterative_scan不得为off
 6. 策略之间必须有明确差异，禁止重复或高度同质化的策略
-7. 仅输出JSON数组，无任何前置、后置说明文字，无markdown格式，无代码块包裹
+7. 过滤路径合法性强制校验：所有输出的策略必须满足以下任一条件，不符合的策略一律不得生成：
+   - `filter_strategy` 为 `post-filter`，且同时满足: `vector_index_used`值不为`null`；
+   - `filter_strategy` 为 `pre-filter`，且同时满足 `sql_rewrite_required = true`、`rewritten_sql` 字段为非空的完整SQL语句。
+8. 仅输出JSON数组，无任何前置、后置说明文字，无markdown格式，无代码块包裹
 
 ---
 """
