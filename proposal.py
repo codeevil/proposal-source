@@ -189,7 +189,6 @@ Access method: heap
 - **迭代回退（Refill Fallback）**：通过迭代扫描自动扩大搜索范围，补足过滤后缺失的行数
 - **执行计划提示**：通过pg_hint_plan强制索引选择、禁止顺序扫描、固定连接顺序
 - **部分索引**：利用带标量条件的向量部分索引，实现Pre-Filter效果同时保留向量索引效率
-- **近似转精确回退**：ANN结果不足时自动回退为精确顺序扫描
 
 ### 4. pg_hint_plan 语法参考
 - 强制指定索引：`/*+ IndexScan(表名 索引名) */`
@@ -281,7 +280,7 @@ Access method: heap
    - IVFFlat参数梯度调优（低/中/高probes）
    - Pre-Filter策略（子查询加 OFFSET 0 的方式/CTE的方式）
    - 迭代回退策略（HNSW/IVFFlat + Refill Fallback）
-   - 特殊优化策略（精确搜索回退、重排序扩大召回、部分索引思路等）
+   - 特殊优化策略（重排序扩大召回、部分索引思路等）
 
 ### 3. 其他通用规则
 - 仅Pre-Filter场景需要SQL改写或pg_hint_plan提示，用于强制执行先过滤后向量搜索的顺序
