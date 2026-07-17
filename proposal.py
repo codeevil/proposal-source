@@ -31,6 +31,10 @@ parser.add_argument("--mode", type=str, default="standard",
                     choices=["extreme", "standard", "balance"],
                     help="Generation mode: extreme (15 diverse strategies), "
                          "standard (default, 10 strategies), balance (6 balanced strategies)")
+parser.add_argument("--dataset", type=str, default=None,
+                    choices=["SIFT", "PAPER", "YFCC"],
+                    help="Dataset to use for statistics (SIFT, PAPER, YFCC). "
+                         "If not specified, uses default stat.txt")
 args = parser.parse_args()
 
 OUTPUT_FILE = args.output
@@ -52,7 +56,12 @@ def read_file(filepath):
         return ""
 
 # Define file paths
-STAT_FILE = "/home/liujianzhong/proposal-source/stat.txt"
+DATASET_STAT_MAP = {
+    "SIFT": "/home/liujianzhong/proposal-source/sift_stat.txt",
+    "PAPER": "/home/liujianzhong/proposal-source/paper_stat.txt",
+    "YFCC": "/home/liujianzhong/proposal-source/yfcc_stat.txt",
+}
+STAT_FILE = DATASET_STAT_MAP.get(args.dataset) if args.dataset else "/home/liujianzhong/proposal-source/stat.txt"
 STAT_CONTENT = read_file(STAT_FILE)
 
 # Mode-based proposal count
