@@ -35,11 +35,15 @@ parser.add_argument("--dataset", type=str, default=None,
                     choices=["SIFT", "PAPER", "YFCC"],
                     help="Dataset to use for statistics (SIFT, PAPER, YFCC). "
                          "If not specified, uses default stat.txt")
+parser.add_argument("--selective", type=float, default=0.01,
+                    help="Scalar filter selectivity ratio (default: 0.01). "
+                         "Common values: 0.01, 0.083, 0.3")
 args = parser.parse_args()
 
 OUTPUT_FILE = args.output
 # SQL_CONTENT = args.sql
 MODE = args.mode
+SELECTIVE = args.selective
 
 
 # Read file contents
@@ -172,7 +176,7 @@ SIFT:
 
 **统计信息：**
 - my_table集合(表)总行数: 1000000
-- equal字段的选择率(过滤后有效数据占比): 0.01
+- equal字段的选择率(过滤后有效数据占比): {SELECTIVE}
 
 ---
 
@@ -426,6 +430,7 @@ def main():
         client_start_time = time.time()
 
         # Add user message to conversation
+        prompt = prompt.replace("{SELECTIVE}", str(SELECTIVE))
         messages.append({"role": "user", "content": prompt})
 
         try:
