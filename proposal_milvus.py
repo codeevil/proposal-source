@@ -32,8 +32,8 @@ parser.add_argument("--mode", type=str, default="standard",
                     help="Generation mode: extreme (15 diverse strategies), "
                          "standard (default, 10 strategies), balance (6 balanced strategies)")
 parser.add_argument("--dataset", type=str, default=None,
-                    choices=["SIFT", "PAPER", "YFCC"],
-                    help="Dataset to use for statistics (SIFT, PAPER, YFCC). "
+                    choices=["SIFT", "PAPER", "YFCC", "GIST", "BIGANN"],
+                    help="Dataset to use for statistics (SIFT, PAPER, YFCC, GIST, BIGANN). "
                          "If not specified, uses default stat.txt")
 parser.add_argument("--selective", type=float, default=0.01,
                     help="Scalar filter selectivity ratio (default: 0.01). "

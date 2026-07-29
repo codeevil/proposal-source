@@ -32,9 +32,11 @@ parser.add_argument("--mode", type=str, default="standard",
                     help="Generation mode: extreme (15 diverse strategies), "
                          "standard (default, 10 strategies), balance (6 balanced strategies)")
 parser.add_argument("--dataset", type=str, default=None,
-                    choices=["SIFT", "PAPER", "YFCC"],
-                    help="Dataset to use for statistics (SIFT, PAPER, YFCC). "
+                    choices=["SIFT", "PAPER", "YFCC", "GIST", "BIGANN"],
+                    help="Dataset to use for statistics (SIFT, PAPER, YFCC, GIST, BIGANN). "
                          "If not specified, uses default stat.txt")
+parser.add_argument("--selectivity", type=float, default=None,
+                    help="Scalar selectivity (e.g., 0.01, 0.083, 0.3)")
 args = parser.parse_args()
 
 OUTPUT_FILE = args.output
@@ -60,6 +62,8 @@ DATASET_STAT_MAP = {
     "SIFT": "/home/liujianzhong/proposal-source/sift_stat.txt",
     "PAPER": "/home/liujianzhong/proposal-source/paper_stat.txt",
     "YFCC": "/home/liujianzhong/proposal-source/yfcc_stat.txt",
+    "GIST": "/home/liujianzhong/proposal-source/gist_stat.txt",
+    "BIGANN": "/home/liujianzhong/proposal-source/bigann_stat.txt",
 }
 STAT_FILE = DATASET_STAT_MAP.get(args.dataset) if args.dataset else "/home/liujianzhong/proposal-source/stat.txt"
 STAT_CONTENT = read_file(STAT_FILE)
@@ -424,6 +428,8 @@ def main():
     print(f"[INFO] Model: {MODEL_NAME}")
     print(f"[INFO] Output file: {OUTPUT_FILE}")
     print(f"[INFO] SQL content length: {len(SQL_CONTENT)}")
+    if args.selectivity is not None:
+        print(f"[INFO] Selectivity: {args.selectivity}")
 
     # print(f"\n[INFO] System prompt: {SYSTEM_PROMPT}")
     # print(f"=" * 60)
@@ -432,6 +438,11 @@ def main():
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT}
     ]
+
+    # 如果指定了选择率，先插入一条上下文消息
+    if args.selectivity is not None:
+        sel_msg = f"当前数据集选择率: {args.selectivity}（标量条件大约过滤到 {args.selectivity*100:.2f}% 的数据）"
+        messages.append({"role": "user", "content": sel_msg})
 
     # # Replace placeholders in prompts with actual values
     # processed_prompts = [p.replace("{SQL_CONTENT}", SQL_CONTENT).replace("{STAT_CONTENT}", STAT_CONTENT).replace("{PROPOSAL_COUNT}", PROPOSAL_COUNT) for p in PROMPTS]
